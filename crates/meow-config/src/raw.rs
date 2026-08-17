@@ -116,6 +116,15 @@ pub struct RawConfig {
     pub tproxy_port: Option<u16>,
     pub tproxy_sni: Option<bool>,
     pub routing_mark: Option<u32>,
+    /// Wall-clock bound, in seconds, on the built-in DIRECT adapter's
+    /// `TcpStream::connect`. Unset = unbounded (legacy behaviour, subject
+    /// only to the OS connect timeout). Motivated by iOS/macOS
+    /// scoped-routing and reachability-cache transients that can leave a
+    /// direct connect hanging indefinitely — see meow-ios
+    /// docs/INVESTIGATION-2026-05-18-tcp-direct-rule-disconnect.md.
+    /// Explicit `type: direct` proxy blocks are NOT covered by this
+    /// global; they accept their own per-proxy `connect-timeout` field.
+    pub tcp_connect_timeout: Option<u64>,
     /// Static host → IP mappings, preferred over upstream DNS lookups.
     /// Values may be a single IP string or a list of IPs.
     pub hosts: Option<HashMap<String, HostsValue>>,
@@ -453,4 +462,21 @@ pub struct RawSubscription {
     pub url: String,
     pub interval: Option<u64>,
     pub last_updated: Option<i64>,
+}
+
+#[cfg(test)]
+mod tcp_connect_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn tcp_connect_timeout_parses_from_kebab_yaml() {
+        let raw: RawConfig = serde_yaml::from_str("tcp-connect-timeout: 10\n").unwrap();
+        assert_eq!(raw.tcp_connect_timeout, Some(10));
+    }
+
+    #[test]
+    fn tcp_connect_timeout_defaults_to_none() {
+        let raw: RawConfig = serde_yaml::from_str("mixed-port: 7890\n").unwrap();
+        assert_eq!(raw.tcp_connect_timeout, None);
+    }
 }
