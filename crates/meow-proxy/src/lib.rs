@@ -1,3 +1,4 @@
+pub mod dialer;
 pub mod direct;
 pub mod group;
 pub mod health;
