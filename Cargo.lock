@@ -2601,6 +2601,7 @@ dependencies = [
  "boring",
  "boring-sys",
  "bytes",
+ "futures",
  "futures-util",
  "h2",
  "hmac",
