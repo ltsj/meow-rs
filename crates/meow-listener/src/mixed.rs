@@ -15,7 +15,9 @@ use tracing::{debug, error, info, warn};
 /// the TCP listen queue and bound RSS under burst load: each live
 /// VLESS+WS+TLS+ECH tunnel costs ~90 KB of userland memory, so a cap of 256
 /// holds RSS to ~50 MB on top of an ~18 MB idle baseline.
-pub const DEFAULT_MAX_CONNECTIONS: usize = 256;
+/// Re-export the shared default so existing callers (`mixed::DEFAULT_MAX_CONNECTIONS`)
+/// keep working. The canonical definition lives in `crate::DEFAULT_MAX_CONNECTIONS`.
+pub use crate::DEFAULT_MAX_CONNECTIONS;
 
 pub struct MixedListener {
     tunnel: Tunnel,

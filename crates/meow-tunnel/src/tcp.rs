@@ -96,12 +96,22 @@ pub async fn handle_tcp(tunnel: &TunnelInner, mut conn: Box<dyn ProxyConn>, meta
 /// `SingleRequestClient`, or the TProxy path that uses eager rule
 /// resolution) keep their own inline routing — this helper only targets the
 /// `pre_handle_metadata` + `resolve_proxy_lazy` + blind-relay shape.
-pub async fn route_inbound_tcp<C: ProxyConn>(
+///
+/// The bound is the relay's actual needs (`AsyncRead + AsyncWrite + Unpin +
+/// Send`) rather than `ProxyConn`: `ProxyConn` is defined in `meow-common`
+/// and cannot be implemented for a foreign type like the `shadowsocks` crate's
+/// `ProxyServerStream` from outside `meow-common` (orphan rule). `Sync` is not
+/// required — the connection lives in a single spawned task. `handle_tcp`
+/// still passes its `Box<dyn ProxyConn>`, which satisfies this bound via
+/// tokio's `Box<?Sized + AsyncRead + Unpin>` impls.
+pub async fn route_inbound_tcp<C>(
     inner: &TunnelInner,
     conn: &mut C,
     mut metadata: Metadata,
     prefix: &[u8],
-) {
+) where
+    C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
     // Fake-IP → host rewrite (no-op outside fake-IP mode aside from a
     // snooping-cache hostname fill-in).
     inner.pre_handle_metadata(&mut metadata);
