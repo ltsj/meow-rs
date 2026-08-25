@@ -1,7 +1,9 @@
 use crate::sniffer::SnifferRuntime;
 use base64::Engine;
 use meow_common::{AuthConfig, ConnType, Metadata, Network};
-use meow_tunnel::{copy_bidirectional_buf_tracked, ConnectionGuard, Tunnel, RELAY_BUF_SIZE};
+use meow_tunnel::{
+    copy_bidirectional_buf_tracked, route_inbound_tcp, ConnectionGuard, Tunnel, RELAY_BUF_SIZE,
+};
 use smallvec::smallvec;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -204,75 +206,12 @@ async fn handle_http_inner(
             rt.sniff(stream, &mut metadata).await;
         }
 
-        // Hand off to tunnel
+        // Hand off to the shared inbound routing+relay path. `leftover`
+        // holds any application bytes the client pipelined ahead of the
+        // 200 OK (RFC 7230 forbids this but real clients do it); the shared
+        // path re-emits them to the remote before the bidirectional copy.
         let inner = tunnel.inner();
-        inner.pre_handle_metadata(&mut metadata);
-        let Some((proxy, rule_name, rule_payload)) = inner.resolve_proxy_lazy(&mut metadata).await
-        else {
-            return Err("no matching rule".into());
-        };
-
-        info!(
-            "{} --> {} match {}({}) using {}",
-            metadata.source_address(),
-            metadata.remote_address(),
-            rule_name,
-            rule_payload,
-            proxy.name()
-        );
-
-        let _guard = ConnectionGuard::track(
-            &inner.stats,
-            metadata.pure(),
-            rule_name,
-            rule_payload,
-            smallvec![Arc::from(proxy.name())],
-        );
-
-        match proxy.dial_tcp(&metadata).await {
-            Ok(mut remote) => {
-                // Per RFC 7230 the client must wait for 200 OK before sending
-                // application data, but if a client pipelined bytes ahead of
-                // that we already read them — forward before relaying.
-                let up = Arc::clone(_guard.counters());
-                let dn = Arc::clone(_guard.counters());
-                if !leftover.is_empty() {
-                    remote.write_all(&leftover).await?;
-                    inner
-                        .stats
-                        .record_upload(&up, leftover.len() as meow_common::atomic::Int);
-                }
-                match copy_bidirectional_buf_tracked(
-                    stream,
-                    &mut remote,
-                    &mut relay_buf_up,
-                    &mut relay_buf_dn,
-                    |n| {
-                        inner
-                            .stats
-                            .record_upload(&up, n as meow_common::atomic::Int);
-                    },
-                    |n| {
-                        inner
-                            .stats
-                            .record_download(&dn, n as meow_common::atomic::Int);
-                    },
-                )
-                .await
-                {
-                    Ok((up, down)) => {
-                        debug!("HTTP CONNECT relay closed: up={up} down={down}");
-                    }
-                    Err(e) => debug!("HTTP CONNECT relay error: {}", e),
-                }
-            }
-            Err(e) => warn!(
-                "{} HTTP CONNECT dial error: {}",
-                metadata.remote_address(),
-                e
-            ),
-        }
-        // _guard drops here, removing the entry from Statistics.
+        route_inbound_tcp(inner, stream, metadata, &leftover).await;
     } else {
         // Plain HTTP proxy (GET/POST/etc via proxy)
         let url = target;
