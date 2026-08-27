@@ -96,6 +96,13 @@ pub async fn handle_tcp(tunnel: &TunnelInner, mut conn: Box<dyn ProxyConn>, meta
 /// `SingleRequestClient`, or the TProxy path that uses eager rule
 /// resolution) keep their own inline routing — this helper only targets the
 /// `pre_handle_metadata` + `resolve_proxy_lazy` + blind-relay shape.
+///
+/// # Visibility
+///
+/// Exported as `pub` from `meow-tunnel` so that `meow-listener` can call it
+/// directly from the SOCKS5/HTTP-CONNECT handlers. This is a workspace-internal
+/// API contract: both crates are in the same workspace and share the
+/// `TunnelInner` type, so the function is not intended for external consumers.
 pub async fn route_inbound_tcp<C: ProxyConn>(
     inner: &TunnelInner,
     conn: &mut C,
@@ -110,7 +117,11 @@ pub async fn route_inbound_tcp<C: ProxyConn>(
     // lookup run only if the scan reaches a rule that demands them.
     let Some((proxy, rule_name, rule_payload)) = inner.resolve_proxy_lazy(&mut metadata).await
     else {
-        warn!("no matching rule for {}", metadata.remote_address());
+        warn!(
+            "{} no matching rule for {}",
+            metadata.conn_type,
+            metadata.remote_address()
+        );
         return;
     };
 
@@ -150,7 +161,12 @@ pub async fn route_inbound_tcp<C: ProxyConn>(
             // as upload so the connection stats stay accurate.
             if !prefix.is_empty() {
                 if let Err(e) = remote.write_all(prefix).await {
-                    debug!("{} prefix write error: {}", metadata.remote_address(), e);
+                    debug!(
+                        "{} {} prefix write error: {}",
+                        metadata.conn_type,
+                        metadata.remote_address(),
+                        e
+                    );
                     return;
                 }
                 inner
@@ -177,19 +193,30 @@ pub async fn route_inbound_tcp<C: ProxyConn>(
             {
                 Ok((up, down)) => {
                     debug!(
-                        "{} closed: up={} down={}",
+                        "{} {} relay closed: up={} down={}",
+                        metadata.conn_type,
                         metadata.remote_address(),
                         up,
                         down
                     );
                 }
                 Err(e) => {
-                    debug!("{} relay error: {}", metadata.remote_address(), e);
+                    debug!(
+                        "{} {} relay error: {}",
+                        metadata.conn_type,
+                        metadata.remote_address(),
+                        e
+                    );
                 }
             }
         }
         Err(e) => {
-            warn!("{} dial error: {}", metadata.remote_address(), e);
+            warn!(
+                "{} {} dial error: {}",
+                metadata.conn_type,
+                metadata.remote_address(),
+                e
+            );
         }
     }
 }

@@ -1500,16 +1500,22 @@ pub(crate) fn resolve_listener_bind(
 
 /// Parse `type:` string from a `listeners:` entry into a `ListenerSpec`.
 /// Hard errors on unknown types (Class A per ADR-0002).
-fn parse_listener_spec(s: &str) -> Result<ListenerSpec, anyhow::Error> {
+///
+/// `per_listener_sni` / `global_tproxy_sni` are folded into the `TProxy`
+/// variant here so the returned spec is always complete — callers never
+/// need to overwrite a placeholder `sni` value. Both parameters are ignored
+/// for non-TProxy types.
+fn parse_listener_spec(
+    s: &str,
+    per_listener_sni: Option<bool>,
+    global_tproxy_sni: bool,
+) -> Result<ListenerSpec, anyhow::Error> {
     match s.to_lowercase().as_str() {
         "mixed" => Ok(ListenerSpec::Mixed),
         "http" => Ok(ListenerSpec::Http),
         "socks5" => Ok(ListenerSpec::Socks5),
         "tproxy" => Ok(ListenerSpec::TProxy {
-            // Per-listener `tproxy-sni` is resolved by the caller from
-            // `RawListener.tproxy_sni` / the global default; the type name
-            // alone carries no sni value.
-            sni: false,
+            sni: per_listener_sni.unwrap_or(global_tproxy_sni),
         }),
         other => anyhow::bail!(
             "unknown listener type '{other}'; expected mixed, http, socks5, or tproxy"
@@ -1607,7 +1613,7 @@ fn build_named_listeners(
 
     // Explicit `listeners:` entries
     for raw_l in raw.listeners.as_deref().unwrap_or(&[]) {
-        let spec = parse_listener_spec(&raw_l.listener_type)?;
+        let spec = parse_listener_spec(&raw_l.listener_type, raw_l.tproxy_sni, global_tproxy_sni)?;
         let listen_raw = raw_l.listen.as_deref().unwrap_or({
             if matches!(spec, ListenerSpec::TProxy { .. }) {
                 "127.0.0.1"
@@ -1616,14 +1622,6 @@ fn build_named_listeners(
             }
         });
         let (listen, port) = resolve_listener_bind(listen_raw, raw_l.port)?;
-        // Fold the per-listener `tproxy-sni` override (or global default) into
-        // the `TProxy` variant here, so downstream code gets a complete spec.
-        let spec = match spec {
-            ListenerSpec::TProxy { .. } => ListenerSpec::TProxy {
-                sni: raw_l.tproxy_sni.unwrap_or(global_tproxy_sni),
-            },
-            other => other,
-        };
         let max_connections = raw_l.max_connections.unwrap_or(global_max_conns);
         add(&raw_l.name, spec, port, &listen, max_connections)?;
     }

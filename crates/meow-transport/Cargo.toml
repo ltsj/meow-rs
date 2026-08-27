@@ -76,7 +76,7 @@ httpupgrade = [
 # client and server share the same fake-TLS record / ClientHello framing, so
 # keeping them in one module lets a single round-trip test guard both halves
 # against framing drift.
-simple-obfs = ["dep:futures", "dep:base64", "dep:rand"]
+simple-obfs = ["dep:base64", "dep:rand"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -105,9 +105,6 @@ rand = { workspace = true, optional = true }
 
 # httpupgrade feature
 httparse = { version = "1", optional = true }
-
-# simple-obfs feature (SIP004 HTTP/TLS obfuscation codec)
-futures = { workspace = true, optional = true }
 
 # reality feature — pure-Rust X25519 so the REALITY handshake does not need
 # BoringSSL's `X25519` FFI (boring-sys does not build on every release target).
